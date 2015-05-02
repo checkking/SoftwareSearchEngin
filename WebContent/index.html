@@ -1,0 +1,185 @@
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SoftwareSearchEngine</title>
+<script type="text/javascript">
+// derived from http://www.degraeve.com/reference/simple-ajax-example.php
+var current_query;
+var pageSize = 10;
+var stepNum = 10;
+var strURL = "/SoftwareSearchEngine/select";
+var clickURL = "/SoftwareSearchEngine/click";
+var pclicks = [0.8,0.12,0.05,0.03];
+var pclickCnt = [200,500,100,100];
+var N = 1000;
+var alph = 0.5;
+var lta = 0.3;
+
+function sortByKey(docs,key){
+	return docs.sort(function(a, b) {
+        var x = a[key]; var y = b[key];
+        return ((x < y) ? 1 : ((x > y) ? -1 : 0));
+    });
+}
+
+function rerank(docs) {
+	for(var i = 0; i < 4; i++) {
+		var clickScore = 1/(1+Math.pow(Math.E,-alph*(pclickCnt[i]/N)/pclicks[i]));
+		docs[i].score = 0.0+lta*(docs[i].score) + (1-lta)*clickScore;
+	}
+	docs = sortByKey(docs,'score');
+	return docs;
+}
+
+function xmlhttpPost(frompager,start) {
+    var xmlHttpReq = false;
+    var self = this;
+    if (window.XMLHttpRequest) { // Mozilla/Safari
+        self.xmlHttpReq = new XMLHttpRequest(); 
+    }
+    else if (window.ActiveXObject) { // IE
+        self.xmlHttpReq = new ActiveXObject("Microsoft.XMLHTTP");
+    }
+    self.xmlHttpReq.open('POST', strURL, true);
+    self.xmlHttpReq.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    self.xmlHttpReq.onreadystatechange = function() {
+        if (self.xmlHttpReq.readyState == 4) {
+            if(frompager!=1){
+            	current_query=getquerystring(0);
+            }
+            else 
+            {
+            	document.forms['f1'].value = current_query;
+            }
+            var rsp = self.xmlHttpReq.responseText;
+            updatepage(rsp);
+        }
+    }
+
+    var params = getstandardargs().concat('q='+getquerystring(frompager)).concat('start='+start).concat('fl=*%2Cscore');
+    var strData = params.join('&');
+    self.xmlHttpReq.send(strData);
+}
+
+function getstandardargs() {
+    var params = [
+        'wt=json'
+        , 'indent=on'
+        , 'hl=true'
+        , 'hl.fl=title,content'
+        ];
+
+    return params;
+}
+function getquerystring(frompager) {
+  var form = document.forms['f1'];
+  if(frompager == 1) {
+  	form.query.value = current_query;
+  }
+  var query = form.query.value;
+  //qstr = 'q=' + escape(query);
+  return query;
+}
+
+// this function does all the work of parsing the solr response and updating the page.
+function updatepage(str){
+  var rsp = eval("("+str+")"); // use eval to parse Solr's JSON response
+  var html= "<span style='font-size:12px;color:#999;'>为您找到相关结果" + rsp.response.numFound+"个，用时"+rsp.responseHeader.QTime/1000+"秒</span>";
+
+ //rsp.response.docs = rerank(rsp.response.docs);
+  
+  for(var i = 0; i < rsp.response.docs.length; i++) {
+      var hl=rsp.highlighting[rsp.response.docs[i].id];
+      if(hl.title != null) {
+          rsp.response.docs[i].title=hl.title;
+      }
+      if(hl.content != null) {
+      	  rsp.response.docs[i].content=hl.content;
+      }
+      if(typeof rsp.response.docs[i].content == "string") {
+      	  rsp.response.docs[i].content = rsp.response.docs[i].content.substring(0,200);
+      }
+      html += "<p><a href=\""+rsp.response.docs[i].url+"\" onmousedown=\"clicklog('"+getquerystring(0)+"',"+(i+1)+",'"+escape(rsp.response.docs[i].url)+"');\" target=\"_blank\">"+rsp.response.docs[i].title
+              +"</a><br><span style='color:#333; font-size:13px;margin-top:3px;'>"+rsp.response.docs[i].content+"</span><br><span style='color:#008000;font-size:13px;'>"+rsp.response.docs[i].url+"</span><span style='float:right;color:#999;font-size:13px;'>score:"+rsp.response.docs[i].score+"</span><br></p>";
+  }
+
+  document.getElementById("result").innerHTML = html;
+  var pagerHtml = getpager(rsp.response.numFound,rsp.response.start);
+  document.getElementById("pager").innerHTML = pagerHtml;
+}
+
+function getpager(numFound,start){
+	var pageNum = Math.floor(numFound/pageSize);
+	var listBegin = Math.ceil(start/pageSize)+1- Math.ceil(stepNum/2);
+	if(listBegin < 0)
+		listBegin = 1;
+	var listEnd = Math.ceil(start/pageSize)+1  + Math.ceil(stepNum/2);
+	if(listEnd > pageNum)
+	    listEnd = pageNum;
+	var htmlStr = "";
+	if(Math.ceil(start/pageSize)+1>1) {
+		htmlStr += '<a href="#" onclick=\"xmlhttpPost(1,'+(Math.ceil(start/pageSize)-1)*pageSize+');\"><span style="margin-right:10px;">上一页</span></a>';
+	}
+	for(var i = listBegin; i <= listEnd; i++)
+	{
+		var tmpStr;
+		if((i-1)*pageSize == start)
+			tmpStr = '<span style="margin-right:10px;">['+i+"]</span>";
+		else 
+			tmpStr = '<a href="#" onclick=\"xmlhttpPost(1,'+(i-1)*pageSize+');\"><span style="margin-right:10px;">['+i+']</span></a>';
+		htmlStr+=tmpStr;
+	}
+	if(Math.ceil(start/pageSize)+1 < pageNum) {
+		htmlStr += '<a href="#" onclick=\"xmlhttpPost(1,'+(Math.ceil(start/pageSize)+1)*pageSize+');\"><span style="margin-right:10px;">下一页</span></a>';
+	}
+	return htmlStr;
+}
+
+function clicklog(query,pos,url){
+    var xmlHttpReq = false;
+    var self = this;
+    if (window.XMLHttpRequest) { // Mozilla/Safari
+        self.xmlHttpReq = new XMLHttpRequest(); 
+    }
+    else if (window.ActiveXObject) { // IE
+        self.xmlHttpReq = new ActiveXObject("Microsoft.XMLHTTP");
+    }
+    self.xmlHttpReq.open('POST', clickURL, true);
+    self.xmlHttpReq.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    self.xmlHttpReq.onreadystatechange = function() {
+        if (self.xmlHttpReq.readyState == 4) {
+        	return;
+        }
+    }
+    var params = [
+                  'q='+query
+                  , 'pos='+pos
+                  , 'url='+url
+                  ];
+    var strData = params.join('&');
+    self.xmlHttpReq.send(strData);
+}
+
+</script>
+</head>
+<body>
+<div id="searchDiv" style="margin:10px 20px;">
+<form name="f1" onsubmit='xmlhttpPost(0,0); return false;'>
+  <p>
+  
+  <img src="/SoftwareSearchEngine/img/solr.png" style="height:33px; float: left;" />
+  <select id="subSelect" style="height:34px;font-size:16px;">
+	  <option value="all">所有网页</option>
+	  <option value="software">软件学院</option>
+	  <option value="economic">经济学院</option>
+	  <option value="cies">信息与科技学院</option>
+  </select>
+  <input name="query" type="text" maxlength="100" style="width:450px;height:34px; padding:2px 2px 2px 2px; font-size:16px">
+  <input value="搜索一下" type="submit" style="width:80px; color:#444;height:34px;background:#f5f5f5;font-size:16px"></p>
+</form>
+</div>
+<div id="result" style="margin:20px 80px; width:600px;"></div>
+<div id="pager" style="margin:0 80px; width:600px;"></div>
+</body>
+</html>
+
